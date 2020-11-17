@@ -1,35 +1,35 @@
 extern crate bindgen;
 extern crate cc;
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 extern crate cmake;
 
 use std::env;
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 use std::fs;
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 use std::io;
-use std::path::PathBuf;
-#[cfg(feature="bundled")]
-use std::process::Command;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "bundled")]
+use std::process::{Command, Stdio};
 
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 fn output_dir() -> PathBuf {
     PathBuf::from(env::var("OUT_DIR").unwrap())
 }
 
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 fn search_dir() -> PathBuf {
     let mut absolute = env::current_dir().unwrap();
     absolute.push(&output_dir());
     absolute
 }
 
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 fn source_dir() -> PathBuf {
     output_dir().join("libyuv")
 }
 
-#[cfg(feature="bundled")]
+#[cfg(feature = "bundled")]
 fn fetch() -> io::Result<()> {
     let status = Command::new("git")
         .current_dir(&output_dir())
@@ -44,8 +44,26 @@ fn fetch() -> io::Result<()> {
     }
 }
 
+fn compiler_include_paths() -> Vec<String> {
+    let output = Command::new("cpp")
+        .arg("-xc++")
+        .arg("-v")
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to execute process");
+    let lines = String::from_utf8(output.stderr).unwrap();
+    let mut includes = Vec::new();
+    for line in lines.lines() {
+        let path = String::from(line.trim_start());
+        if Path::exists(Path::new(&path)) {
+            includes.push(path);
+        }
+    }
+    includes
+}
+
 fn main() {
-    #[cfg(feature="bundled")]
+    #[cfg(feature = "bundled")]
     let include_paths: Vec<PathBuf> = {
         let statik = cfg!(feature = "static-link");
 
@@ -74,7 +92,7 @@ fn main() {
         vec![search_dir().join("include")]
     };
 
-    #[cfg(not(feature="bundled"))]
+    #[cfg(not(feature = "bundled"))]
     let include_paths: Vec<PathBuf> = {
         println!("cargo:rustc-link-lib=yuv");
 
@@ -92,7 +110,6 @@ fn main() {
 
     let mut bindgen = bindgen::Builder::default()
         .header("wrapper.h")
-        .trust_clang_mangling(false)
         .blacklist_type("max_align_t") // Until https://github.com/rust-lang-nursery/rust-bindgen/issues/550 gets fixed
         ;
 
@@ -104,6 +121,10 @@ fn main() {
         bindgen = bindgen
             .clang_arg("-I")
             .clang_arg(dir.to_string_lossy().into_owned());
+    }
+
+    for p in compiler_include_paths() {
+        bindgen = bindgen.clang_arg("-I").clang_arg(p);
     }
 
     let bindings = bindgen.generate().expect("Unable to generate bindings");
